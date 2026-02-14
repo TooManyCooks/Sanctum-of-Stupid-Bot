@@ -1,225 +1,75 @@
+import logging
+import os
+
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
-import os
-import logging
 
-import time
-import datetime
-import tempfile
+from PriorTracker import register_prior_tracker
 
-import json
-from pathlib import Path
+# Temporary placeholders (replace these with your real values)
+DISCORD_TOKEN = "PASTE_DISCORD_BOT_TOKEN_HERE"
+GUILD_ID = "PASTE_GUILD_ID_HERE"
 
-### Discord Bot Information
-load_dotenv()
-token = os.getenv("discord_token")
-handler = logging.FileHandler(filename="discord.log", encoding="utf-8", mode="w")
-intents = discord.Intents.default()
-intents.message_content = True
-intents.members = True
-intents.voice_states = True
-bot = commands.Bot(command_prefix="/", intents=intents)
 
-### Variables
+def create_bot() -> commands.Bot:
+    intents = discord.Intents.default()
+    intents.message_content = True
+    intents.members = True
+    intents.voice_states = True
 
-activity_req = 14 # days of activity to check
-voice_limit = 1 # hours needed 
-text_limit = 10 # messages needed
+    bot = commands.Bot(command_prefix="/", intents=intents)
 
-### json portions
-TEXT_TRACKER  = Path(r"C:\Users\trans\OneDrive\Desktop\Python Projects\Sanctum Bot Projects\SanctumRoleGiverV3\TextTracker.json")
-VOICE_TRACKER = Path(r"C:\Users\trans\OneDrive\Desktop\Python Projects\Sanctum Bot Projects\SanctumRoleGiverV3\VoiceTracker.json")
+    # Register modular features
+    register_prior_tracker(bot)
 
-def load_json(path: Path) -> dict:
-    """Load JSON safely and reset to {} if missing/invalid."""
-    if not path.exists():
-        path.write_text("{}", encoding="utf-8")
-        return {}
+    @bot.command()
+    async def check_status(ctx):
+        """Reply with a simple status message."""
+        await ctx.send(f"{bot.user.name} is online and connected to Discord")
 
-    raw = path.read_text(encoding="utf-8").strip()
-    if not raw:
-        path.write_text("{}", encoding="utf-8")
-        return {}
+    @bot.event
+    async def on_ready():
+        guild = bot.get_guild(int(bot.target_guild_id)) if bot.target_guild_id else None
+        if guild:
+            print(f"{bot.user} is online and connected to guild: {guild.name} ({guild.id})")
+        else:
+            print(f"{bot.user} is online and connected to Discord")
+
+    return bot
+
+
+def _resolve_runtime_settings() -> tuple[str, str]:
+    """Resolve token and guild id from env (preferred) or placeholders."""
+    load_dotenv()
+
+    token = os.getenv("discord_token") or DISCORD_TOKEN
+    guild_id = os.getenv("discord_guild_id") or GUILD_ID
+
+    if token == "PASTE_DISCORD_BOT_TOKEN_HERE":
+        raise RuntimeError("Please set DISCORD_TOKEN placeholder or discord_token env var.")
+
+    if guild_id == "PASTE_GUILD_ID_HERE":
+        raise RuntimeError("Please set GUILD_ID placeholder or discord_guild_id env var.")
 
     try:
-        return json.loads(raw)
-    except Exception:
-        path.write_text("{}", encoding="utf-8")
-        return {}
+        int(guild_id)
+    except ValueError as exc:
+        raise RuntimeError("Guild ID must be a numeric Discord guild ID.") from exc
 
-def save_json(path: Path, data: dict) -> None:
-    """Save a dict to disk as pretty JSON."""
-    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
-
-text_data  = load_json(TEXT_TRACKER)
-voice_data = load_json(VOICE_TRACKER)
-
-def ensure_text_user(data: dict, guild_id: int, user_id: int, display: str) -> dict:
-    gid = str(guild_id)
-    uid = str(user_id)
-
-    g = data.setdefault("guilds", {}).setdefault(gid, {})
-    users = g.setdefault("users", {})
-    user = users.setdefault(uid, {"display": display, "messages": []})
-    # keep fields and display up to date
-    user["display"] = display
-    if "messages" not in user:
-        user["messages"] = []
-
-    return user
-
-# log text activity
-async def log_text_activity(message: discord.Message) -> None:
-    if message.author.bot or not message.guild:
-        return
-
-    user = ensure_text_user(
-        text_data,
-        message.guild.id,
-        message.author.id,
-        message.author.display_name,
-    )
-
-    ts = int(message.created_at.timestamp())
-    if ts in user["messages"]:
-        return
-
-    user["messages"].append(ts)
-    save_json(TEXT_TRACKER, text_data)
-
-# 
-def ensure_voice_user(data: dict, guild_id: int, user_id: int, display: str) -> dict:
-    gid = str(guild_id)
-    uid = str(user_id)
-
-    g = data.setdefault("guilds", {}).setdefault(gid, {})
-    users = g.setdefault("users", {})
-    user = users.setdefault(uid, {
-        "display": display,
-        "sessions": [],
-        "_open": None,
-    })
-
-    # keep fields and display up to date
-    user["display"] = display
-    if "sessions" not in user:
-        user["sessions"] = []
-    if "_open" not in user:
-        user["_open"] = None
-
-    return user
-
-# log voice activity
-async def log_voice_activity(
-    member: discord.Member,
-    before: discord.VoiceState,
-    after: discord.VoiceState,
-) -> None:
-    if member.bot or not member.guild:
-        return
-
-    user = ensure_voice_user(
-        voice_data,
-        member.guild.id,
-        member.id,
-        member.display_name,
-    )
-
-    now = int(time.time())
-
-    joined = before.channel is None and after.channel is not None
-    left   = before.channel is not None and after.channel is None
-
-    if joined:
-        user["_open"] = now
-        save_json(VOICE_TRACKER, voice_data)
-
-    elif left:
-        start = user.get("_open")
-        user["_open"] = None
-
-        if isinstance(start, int) and now >= start:
-            user["sessions"].append({"start": start, "end": now})
-            save_json(VOICE_TRACKER, voice_data)
+    return token, guild_id
 
 
-### =====> Events
+def run_bot() -> None:
+    """Load configuration and start the Discord bot."""
+    token, guild_id = _resolve_runtime_settings()
 
-@bot.event
-async def on_message(message: discord.Message):
-    await log_text_activity(message)
-    await bot.process_commands(message)
-
-@bot.event
-async def on_voice_state_update(
-    member: discord.Member,
-    before: discord.VoiceState,
-    after: discord.VoiceState,
-):
-    await log_voice_activity(member, before, after)
+    handler = logging.FileHandler(filename="discord.log", encoding="utf-8", mode="w")
+    bot = create_bot()
+    # attach configured guild id for lightweight ready-time diagnostics
+    bot.target_guild_id = guild_id  # type: ignore[attr-defined]
+    bot.run(token, log_handler=handler, log_level=logging.INFO)
 
 
-# =====> COMMANDS
-
-# /SanctumHelp
-
-# /check status
-@bot.command()
-async def check_status(ctx):
-    """Reply with a simple status message."""
-    await ctx.send(f'{bot.user.name} is online and connected to Discord')
-
-# /backfill_text_log
-@bot.command(name="backfill_text_log")
-async def backfill_text(ctx: commands.Context):
-    """
-    Backfill message activity for the last 14 days into TextTracker.json.
-    Admin-only.
-    """
-    await ctx.send("Starting text backfill for the last 14 days...", delete_after=10)
-
-    # compute cutoff time
-    cutoff = discord.utils.utcnow() - datetime.timedelta(days=14)
-
-    guild = ctx.guild
-    if guild is None:
-        await ctx.send("This command can only be used in a server.", delete_after=10)
-        return
-
-    channels = list(guild.text_channels)
-    total_seen = 0
-    total_logged = 0
-
-    for channel in channels:
-        # skip channels we can't read
-        if not channel.permissions_for(guild.me).read_messages:
-            continue
-        if not channel.permissions_for(guild.me).read_message_history:
-            continue
-
-        try:
-            # oldest_first=True so events are in time order
-            async for msg in channel.history(after=cutoff, oldest_first=True, limit=None):
-                total_seen += 1
-                # reuse your existing logger; it already ignores bots/DMs
-                await log_text_activity(msg)
-                total_logged += 1
-        except (discord.Forbidden, discord.HTTPException):
-            # no access or error; skip this channel
-            continue
-
-    await ctx.send(
-        f"Backfill complete.\n"
-        f"Messages scanned: {total_seen}\n"
-        f"Messages logged: {total_logged}",
-        delete_after=30
-    )
-
-### Execution Tree 
-
-@bot.event
-async def on_ready():
-    print(f'{bot.user} is online and connected to Discord')
-
-bot.run(token, log_handler=handler, log_level=logging.DEBUG)
+if __name__ == "__main__":
+    run_bot()
