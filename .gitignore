@@ -1,0 +1,7 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+discord.log
+TextTracker.json
+VoiceTracker.json

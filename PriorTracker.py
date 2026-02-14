@@ -72,9 +72,9 @@ def register_prior_tracker(bot: commands.Bot) -> None:
     text_data = load_json(TEXT_TRACKER)
     voice_data = load_json(VOICE_TRACKER)
 
-    async def log_text_activity(message: discord.Message) -> None:
+    async def log_text_activity(message: discord.Message) -> bool:
         if message.author.bot or not message.guild:
-            return
+            return False
 
         user = ensure_text_user(
             text_data,
@@ -85,10 +85,11 @@ def register_prior_tracker(bot: commands.Bot) -> None:
 
         ts = int(message.created_at.timestamp())
         if ts in user["messages"]:
-            return
+            return False
 
         user["messages"].append(ts)
         save_json(TEXT_TRACKER, text_data)
+        return True
 
     async def log_voice_activity(
         member: discord.Member,
@@ -132,6 +133,7 @@ def register_prior_tracker(bot: commands.Bot) -> None:
         await log_voice_activity(member, before, after)
 
     @bot.command(name="backfill_text_log")
+    @commands.has_permissions(administrator=True)
     async def backfill_text(ctx: commands.Context):
         """Backfill message activity for the last 14 days into TextTracker.json."""
         await ctx.send("Starting text backfill for the last 14 days...", delete_after=10)
@@ -152,26 +154,8 @@ def register_prior_tracker(bot: commands.Bot) -> None:
             try:
                 async for msg in channel.history(after=cutoff, oldest_first=True, limit=None):
                     total_seen += 1
-                    before = len(
-                        ensure_text_user(
-                            text_data,
-                            msg.guild.id,
-                            msg.author.id,
-                            msg.author.display_name,
-                        )["messages"]
-                    ) if (not msg.author.bot and msg.guild) else None
-                    await log_text_activity(msg)
-                    if before is not None:
-                        after_count = len(
-                            ensure_text_user(
-                                text_data,
-                                msg.guild.id,
-                                msg.author.id,
-                                msg.author.display_name,
-                            )["messages"]
-                        )
-                        if after_count > before:
-                            total_logged += 1
+                    if await log_text_activity(msg):
+                        total_logged += 1
             except (discord.Forbidden, discord.HTTPException):
                 continue
 
@@ -181,3 +165,10 @@ def register_prior_tracker(bot: commands.Bot) -> None:
             f"Messages logged: {total_logged}",
             delete_after=30,
         )
+
+    @backfill_text.error
+    async def backfill_text_error(ctx: commands.Context, error: commands.CommandError):
+        if isinstance(error, commands.MissingPermissions):
+            await ctx.send("You need administrator permission to run this command.", delete_after=10)
+            return
+        raise error
