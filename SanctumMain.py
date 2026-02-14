@@ -13,7 +13,7 @@ def create_bot() -> commands.Bot:
     intents.members = True
     intents.voice_states = True
 
-    bot = commands.Bot(command_prefix="!", intents=intents)
+    bot = commands.Bot(command_prefix="/", intents=intents)
 
     # Register modular features
     register_prior_tracker(bot)
