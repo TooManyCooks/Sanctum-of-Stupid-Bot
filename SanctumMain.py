@@ -7,18 +7,13 @@ from dotenv import load_dotenv
 
 from PriorTracker import register_prior_tracker
 
-# Temporary placeholders (replace these with your real values)
-DISCORD_TOKEN = "PASTE_DISCORD_BOT_TOKEN_HERE"
-GUILD_ID = "PASTE_GUILD_ID_HERE"
-
-
 def create_bot() -> commands.Bot:
     intents = discord.Intents.default()
     intents.message_content = True
     intents.members = True
     intents.voice_states = True
 
-    bot = commands.Bot(command_prefix="/", intents=intents)
+    bot = commands.Bot(command_prefix="!", intents=intents)
 
     # Register modular features
     register_prior_tracker(bot)
@@ -40,17 +35,17 @@ def create_bot() -> commands.Bot:
 
 
 def _resolve_runtime_settings() -> tuple[str, str]:
-    """Resolve token and guild id from env (preferred) or placeholders."""
+    """Resolve token and guild id from environment variables."""
     load_dotenv()
 
-    token = os.getenv("discord_token") or DISCORD_TOKEN
-    guild_id = os.getenv("discord_guild_id") or GUILD_ID
+    token = os.getenv("discord_token")
+    guild_id = os.getenv("discord_guild_id")
 
-    if token == "PASTE_DISCORD_BOT_TOKEN_HERE":
-        raise RuntimeError("Please set DISCORD_TOKEN placeholder or discord_token env var.")
+    if not token:
+        raise RuntimeError("Missing discord_token environment variable.")
 
-    if guild_id == "PASTE_GUILD_ID_HERE":
-        raise RuntimeError("Please set GUILD_ID placeholder or discord_guild_id env var.")
+    if not guild_id:
+        raise RuntimeError("Missing discord_guild_id environment variable.")
 
     try:
         int(guild_id)
