@@ -87,7 +87,10 @@ def register_prior_tracker(bot: commands.Bot) -> None:
         if ts in user["messages"]:
             return False
 
-        user["messages"].append(ts)
+        messages = user["messages"]
+        messages.append(ts)
+        if len(messages) > TEXT_LIMIT:
+            del messages[:-TEXT_LIMIT]
         save_json(TEXT_TRACKER, text_data)
         return True
 
@@ -109,16 +112,35 @@ def register_prior_tracker(bot: commands.Bot) -> None:
         now = int(time.time())
         joined = before.channel is None and after.channel is not None
         left = before.channel is not None and after.channel is None
+        modified = False
 
         if joined:
             user["_open"] = now
-            save_json(VOICE_TRACKER, voice_data)
+            modified = True
         elif left:
             start = user.get("_open")
             user["_open"] = None
+            modified = True
             if isinstance(start, int) and now >= start:
                 user["sessions"].append({"start": start, "end": now})
-                save_json(VOICE_TRACKER, voice_data)
+
+        sessions = user.get("sessions")
+        if isinstance(sessions, list) and sessions:
+            cutoff = now - int(VOICE_LIMIT * 3600)
+            pruned = [
+                s for s in sessions
+                if not (
+                    isinstance(s, dict)
+                    and isinstance(s.get("end"), int)
+                    and s["end"] < cutoff
+                )
+            ]
+            if len(pruned) != len(sessions):
+                user["sessions"] = pruned
+                modified = True
+
+        if modified:
+            save_json(VOICE_TRACKER, voice_data)
 
     @bot.listen("on_message")
     async def prior_tracker_on_message(message: discord.Message):
@@ -135,10 +157,10 @@ def register_prior_tracker(bot: commands.Bot) -> None:
     @bot.command(name="backfill_text_log")
     @commands.has_permissions(administrator=True)
     async def backfill_text(ctx: commands.Context):
-        """Backfill message activity for the last 14 days into TextTracker.json."""
-        await ctx.send("Starting text backfill for the last 14 days...", delete_after=10)
+        """Backfill message activity for the last {ACTIVITY_REQ} days into TextTracker.json."""
+        await ctx.send(f"Starting text backfill for the last {ACTIVITY_REQ} days...", delete_after=ACTIVITY_REQ)
 
-        cutoff = discord.utils.utcnow() - datetime.timedelta(days=14)
+        cutoff = discord.utils.utcnow() - datetime.timedelta(days=ACTIVITY_REQ)
         guild = ctx.guild
         if guild is None:
             await ctx.send("This command can only be used in a server.", delete_after=10)
@@ -163,8 +185,9 @@ def register_prior_tracker(bot: commands.Bot) -> None:
             f"Backfill complete.\n"
             f"Messages scanned: {total_seen}\n"
             f"Messages logged: {total_logged}",
-            delete_after=30,
         )
+
+
 
     @backfill_text.error
     async def backfill_text_error(ctx: commands.Context, error: commands.CommandError):
